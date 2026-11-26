@@ -119,6 +119,16 @@ h1 .sub{font-size:13px;font-weight:500;color:var(--muted);margin-left:6px;letter
 .mine-act button{flex:1;height:36px;border-radius:9px;border:1px solid var(--line);background:transparent;font-weight:600;cursor:pointer}
 .mine-act #copy{background:var(--fg);color:var(--bg);border-color:var(--fg)}
 .mine-act #clear.arm{color:var(--accent);border-color:var(--accent)}
+.grad{border-top:1px solid var(--line);padding:12px 16px}
+.grad-h{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:13px;font-weight:700}
+.grad-h a{font-size:12px;font-weight:600;color:var(--muted);text-decoration:none;white-space:nowrap}
+.grad-h a:hover{color:var(--fg);text-decoration:underline}
+.grad ul{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:5px}
+.grad li{display:flex;justify-content:space-between;gap:8px;font-size:13px}
+.grad li .num{font-family:var(--mono);font-weight:600;color:var(--accent);font-variant-numeric:tabular-nums}
+.grad li .num.ok{color:var(--muted)}
+.grad .done{margin-top:6px;font-size:13px;color:var(--muted)}
+.tags em.need{color:var(--accent);border-color:var(--accent)}
 
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(24px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:9px 15px;border-radius:999px;font-size:13px;font-weight:600;z-index:20;white-space:nowrap;max-width:calc(100% - 32px);overflow:hidden;text-overflow:ellipsis}
 
@@ -182,6 +192,7 @@ h1 .sub{font-size:13px;font-weight:500;color:var(--muted);margin-left:6px;letter
     </button>
     <div class="mine-body" id="mineBody">
       <ol class="mine-list" id="mineList"></ol>
+      <div class="grad" id="grad"></div>
       <div class="mine-act">
         <button id="copy" type="button">복사</button>
         <button id="clear" type="button">비우기</button>
@@ -236,6 +247,54 @@ if (fromHash()) S.grade = fromHash();
 let q = '', area = null, hoverK = null;
 const save = () => store.set(S);
 
+// 졸업 학점 페이지와 연동: 같은 사이트(sunlitkoreakorea.github.io)라 localStorage를 함께 쓴다.
+//   sugang-2027-1/export : 학년별로 고른 과목(교과군 포함) → 졸업 학점 페이지가 '예정'으로 더함
+//   grad-credits/v1      : 수강신청 현황 파일에서 계산한 이수 학점 요약 → 여기서 남은 요건 표시
+const EXPORT_KEY = 'sugang-2027-1/export', GRAD_KEY = 'grad-credits/v1';
+const GRAD_URL = /github\.io$|^localhost$|^127\./.test(location.hostname) ? '../grad-credits/' : 'https://sunlitkoreakorea.github.io/grad-credits/';
+const GRP = { korean: '국어', math: '수학', english: '영어', social: '사회', science: '과학', foreign: '기타', info: '기타', research: '기타' };
+const gradGroup = r => GRP[r.a] || (/체육|스포츠/.test(r.n) ? '체육' : '예술');
+const ls = {
+  get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+};
+let lastExport = '';
+function writeExport() {
+  const grades = {};
+  for (const g of [1, 2, 3]) {
+    const p = S.picks[g]; if (!p) continue;
+    grades[g] = Object.keys(p).sort(blockSort).map(b => SIG[g].get(p[b])).filter(Boolean)
+      .map(r => ({ b: r.b, n: r.n, c: r.c, grp: gradGroup(r) }));
+  }
+  const s = JSON.stringify({ year: DATA.year, term: DATA.term, grades });
+  if (s !== lastExport) { lastExport = s; ls.set(EXPORT_KEY, s); }
+}
+function gradNeeds(g, picked) {
+  const G = ls.get(GRAD_KEY), sm = G && G.summary;
+  if (!sm || !sm.rules) return { linked: false };
+  if (sm.planGrade !== g) return { linked: true, other: true };
+  const add = {}; let subj = sm.subject;
+  for (const b in picked) { const r = picked[b], k = gradGroup(r); add[k] = (add[k] || 0) + r.c; subj += r.c; }
+  const need = [], short = new Set();
+  if (subj < sm.rules.totalSubject) need.push(['교과 합계', sm.rules.totalSubject - subj]);
+  for (const [k, min] of sm.rules.groups) {
+    const cur = (sm.taken[k] || 0) + (add[k] || 0);
+    if (cur < min) { need.push([k, min - cur]); short.add(k); }
+  }
+  const kme = sm.rules.kmeKeys.reduce((s, k) => s + (sm.taken[k] || 0) + (add[k] || 0), 0);
+  const cap = sm.rules.kmeCap + Math.floor(Math.max(0, subj - sm.rules.totalSubject) * sm.rules.kmeExcessRatio);
+  if (kme > cap) need.push(['국수영 초과', kme - cap]);
+  return { linked: true, need, short };
+}
+function gradHTML(G) {
+  if (!G.linked) return `<div class="grad-h">졸업 학점<a href="${GRAD_URL}">파일 넣고 보기 ↗</a></div>`;
+  if (G.other) return `<div class="grad-h">졸업 학점<a href="${GRAD_URL}">열기 ↗</a></div>`;
+  return `<div class="grad-h">졸업까지 남은 것<a href="${GRAD_URL}">자세히 ↗</a></div>`
+    + (G.need.length
+      ? `<ul>${G.need.map(([k, v]) => `<li><span>${esc(k)}</span><span class="num">${v}학점</span></li>`).join('')}</ul>`
+      : `<div class="done">이번 학기까지 고르면 모두 충족</div>`);
+}
+
 function picksFor(g) {
   if (!S.picks[g]) {            // 처음 여는 학년: 과목이 하나뿐인 블록은 미리 채움
     const p = {};
@@ -254,12 +313,13 @@ function matches(r, words) {
   return words.every(w => hay.includes(w));
 }
 
-function tileHTML(r, blkB, picked, takenAt, offered) {
+function tileHTML(r, blkB, picked, takenAt, offered, short) {
   const on = picked[blkB] === r;
   const tb = takenAt[r.k];
   const taken = !on && tb && tb !== blkB;
   const also = [...offered[r.k]].filter(b => b !== blkB).sort(blockSort);
   const tags = r.x.map(([s, full]) => `<em title="${esc(full)}">${esc(s)}</em>`);
+  if (short && short.has(gradGroup(r)) && !on) tags.unshift(`<em class="need" title="${gradGroup(r)} 학점이 졸업 기준보다 모자람">졸업에 필요</em>`);
   if (r.g.length > 1) tags.push(`<em class="mix">${r.g.join(',')}학년</em>`);
   return `<button class="tile${on ? ' on' : ''}${taken ? ' taken' : ''}" type="button" data-sig="${esc(r.sig)}" data-k="${esc(r.k)}" style="--ac:var(--a-${r.a})" aria-pressed="${on}">`
     + `<span class="nm"><i class="dot"></i>${esc(r.n)}</span>`
@@ -277,6 +337,9 @@ function render() {
   const picked = {}, takenAt = {}, offered = {};
   for (const b in p) { const r = SIG[g].get(p[b]); picked[b] = r; takenAt[r.k] = b; }
   for (const blk of blocks) for (const r of blk.rows) (offered[r.k] ||= new Set()).add(blk.b);
+  writeExport();
+  const G = gradNeeds(g, picked);
+  $('grad').innerHTML = gradHTML(G);
 
   // 분야 칩: 이 학년에 있는 분야만
   const present = new Set(blocks.flatMap(blk => blk.rows.map(r => r.a)));
@@ -288,7 +351,7 @@ function render() {
   let shown = 0, total = 0;
   const html = blocks.map(blk => {
     total += blk.rows.length;
-    const tiles = blk.rows.filter(r => matches(r, words)).map(r => tileHTML(r, blk.b, picked, takenAt, offered));
+    const tiles = blk.rows.filter(r => matches(r, words)).map(r => tileHTML(r, blk.b, picked, takenAt, offered, G.short));
     shown += tiles.length;
     if (!tiles.length) return '';
     return `<div class="row${picked[blk.b] ? ' has-pick' : ''}" id="blk-${blk.b}">`
@@ -427,6 +490,10 @@ const ro = new ResizeObserver(() => {
   document.documentElement.style.setProperty('--bh', $('mineBar').offsetHeight + 'px');
 });
 ro.observe($('top')); ro.observe($('mineBar'));
+
+// 졸업 학점 페이지에서 파일을 바꾸면(다른 탭, 뒤로 가기) 다시 계산
+window.addEventListener('storage', e => { if (e.key === GRAD_KEY) render(); });
+window.addEventListener('pageshow', e => { if (e.persisted) render(); });
 
 render();
 </script>
