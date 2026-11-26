@@ -303,7 +303,16 @@ function picksFor(g) {
     S.picks[g] = p;
   }
   const p = S.picks[g];
-  for (const b in p) { const r = SIG[g].get(p[b]); if (!r || r.b !== b) delete p[b]; }
+  for (const b in p) {
+    let r = SIG[g].get(p[b]);
+    if (!r) {   // 목록이 바뀌어 선생님 이름 등이 달라졌으면 같은 블록의 같은 과목으로 다시 잡는다
+      const name = String(p[b]).split('|')[1];
+      const blk = VIEW[g].find(x => x.b === b);
+      r = blk && blk.rows.find(x => x.n === name);
+      if (r) { p[b] = r.sig; save(); }
+    }
+    if (!r || r.b !== b) delete p[b];
+  }
   return p;
 }
 

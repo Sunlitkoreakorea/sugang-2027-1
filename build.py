@@ -159,6 +159,12 @@ for row in cells[hi + 1:]:
         **({'d': chg} if chg else {}),
     })
 
+# 새로 추가된 행인데 같은 과목이 다른 블록에 이미 있으면 '새 과목' 대신 '○○에 추가'
+for d in data:
+    if d.get('d') == ['새 과목'] and any(o is not d and o['n'] == d['n'] and set(o['g']) & set(d['g']) for o in data):
+        d['d'] = [f"{d['b']}에 추가"]
+        changes.append(f"{d['g']}/{d['b']} {d['n']}: 같은 과목이 다른 블록에 있어 '{d['b']}에 추가'로 표시")
+
 for line in changes:
     print('  바뀐 과목:', line)
 
