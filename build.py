@@ -1,5 +1,8 @@
-# 사용: python -I build.py raw/2027-1_1차.xlsx
+# 사용: python -I build.py raw/2027-1_1차_수정.xlsx "1차 수정"
+#   두 번째 인자는 제목 옆에 붙는 목록 이름(없으면 "1차 목록").
 # 엑셀(년도/학기/학년/블록/학점/과목명/대표교사명/공동교사명)을 읽어
+# 수정본처럼 머리 위에 '변경 있음'/'신규 추가' 색 범례가 있고 칸에 "D1 → D2"처럼 적혀 있으면
+# 바뀐 뒤 값으로 넣고, 타일에 "D1에서 옮김", "3→4학점", "새 과목" 태그를 단다.
 # template.html 의 /*DATA*/…/*END*/ 자리에 넣고
 #   artifact.html (아티팩트용 조각)  /  index.html (그냥 열어보는 완전한 문서) 를 만든다.
 import json, re, sys
@@ -8,6 +11,7 @@ import openpyxl
 
 HERE = Path(__file__).resolve().parent
 src = Path(sys.argv[1])
+label = sys.argv[2] if len(sys.argv) > 2 else '1차 목록'
 
 EXPECT = ('년도', '학기', '학년', '블록', '학점', '과목명', '대표교사명', '공동교사명')
 
@@ -82,23 +86,67 @@ def people(main, co):
     return out
 
 
-wb = openpyxl.load_workbook(src, read_only=True, data_only=True)
+wb = openpyxl.load_workbook(src, data_only=True)
 ws = wb.worksheets[0]
-rows = list(ws.iter_rows(values_only=True))
-hdr = tuple(clean(h) for h in rows[0][:8])
-assert hdr == EXPECT, f'열 이름이 다름: {hdr}'
+cells = [row[:8] for row in ws.iter_rows()]
 
-data, missing = [], []
+
+def fill_key(c):
+    f = c.fill
+    if f is None or f.fill_type is None:
+        return None
+    col = f.fgColor
+    return (col.type, col.rgb if col.type == 'rgb' else (col.theme if col.type == 'theme' else col.indexed), round(col.tint or 0, 2))
+
+
+# 머리 행 찾기 + 그 위의 색 범례
+hi = next(i for i, row in enumerate(cells[:10]) if tuple(clean(c.value) for c in row) == EXPECT)
+legend = {}
+for row in cells[:hi]:
+    for c in row:
+        k, v = fill_key(c), clean(c.value)
+        if k and v:
+            legend[k] = 'new' if '신규' in v else 'chg' if ('변경' in v or '수정' in v) else None
+
+
+def split_arrow(v):
+    v = clean(v)
+    if '→' in v:
+        a, b = [x.strip() for x in v.split('→', 1)]
+        return b, a
+    return v, None
+
+
+data, missing, changes = [], [], []
 year = term = None
-for r in rows[1:]:
-    if not any(v is not None for v in r):
+for row in cells[hi + 1:]:
+    if not any(c.value is not None for c in row):
         continue
-    y, t, g, b, c, n, t1, t2 = r[:8]
+    vals, olds = [], []
+    for c in row:
+        v, o = split_arrow(c.value) if isinstance(c.value, str) else (c.value, None)
+        vals.append(v); olds.append(o)
+    y, t, g, b, c, n, t1, t2 = vals
     year, term = year or y, term or t
     name, tags = split_name(n)
     area = area_of(name)
     if not area:
         missing.append(name)
+    status = next((legend.get(fill_key(x)) for x in row if legend.get(fill_key(x))), None)
+    chg = []
+    if olds[3]:
+        chg.append(f'{olds[3]}에서 옮김')
+    if olds[4]:
+        chg.append(f'{olds[4]}→{c}학점')
+    for i, nm in ((0, '년도'), (1, '학기'), (2, '학년'), (5, '과목명'), (6, '교사'), (7, '교사')):
+        if olds[i]:
+            chg.append(f'{nm} 바뀜')
+    if status == 'new':
+        chg = ['새 과목']
+    elif status == 'chg' and not chg:
+        chg = ['바뀜']
+    if chg:
+        changes.append(f'{g}/{clean(b)} {name}: {", ".join(chg)}')
     grades = [int(x) for x in re.findall(r'\d', str(g))]
     data.append({
         'g': grades,
@@ -108,12 +156,16 @@ for r in rows[1:]:
         't': people(t1, t2),
         'x': tags,
         'a': area or 'research',
+        **({'d': chg} if chg else {}),
     })
+
+for line in changes:
+    print('  바뀐 과목:', line)
 
 if missing:
     print('  ! 분야를 못 정한 과목:', sorted(set(missing)))
 
-payload = {'year': year, 'term': term, 'rows': data}
+payload = {'year': year, 'term': term, 'label': label, 'rows': data}
 js = json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
 
 tpl = (HERE / 'template.html').read_text(encoding='utf-8')

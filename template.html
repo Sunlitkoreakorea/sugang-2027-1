@@ -129,6 +129,7 @@ h1 .sub{font-size:13px;font-weight:500;color:var(--muted);margin-left:6px;letter
 .grad li .num.ok{color:var(--muted)}
 .grad .done{margin-top:6px;font-size:13px;color:var(--muted)}
 .tags em.need{color:var(--accent);border-color:var(--accent)}
+.tags em.chg{color:var(--fg);border-color:var(--fg);font-weight:600}
 
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(24px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:9px 15px;border-radius:999px;font-size:13px;font-weight:600;z-index:20;white-space:nowrap;max-width:calc(100% - 32px);overflow:hidden;text-overflow:ellipsis}
 
@@ -164,7 +165,7 @@ h1 .sub{font-size:13px;font-weight:500;color:var(--muted);margin-left:6px;letter
 <header class="top" id="top">
   <div class="wrap top-in">
     <div class="title-row">
-      <h1><span class="yr">2027-1</span>예비수강신청<span class="sub">1차 목록</span></h1>
+      <h1><span class="yr">2027-1</span>예비수강신청<span class="sub" id="label">1차 목록</span></h1>
       <div class="seg" role="tablist" id="grades">
         <button role="tab" id="g1" data-g="1">1학년</button>
         <button role="tab" id="g2" data-g="2">2학년</button>
@@ -309,7 +310,7 @@ function picksFor(g) {
 function matches(r, words) {
   if (area && r.a !== area) return false;
   if (!words.length) return true;
-  const hay = (r.n + ' ' + r.t.join(' ') + ' ' + r.x.map(x => x[0]).join(' ')).toLowerCase();
+  const hay = (r.n + ' ' + r.t.join(' ') + ' ' + r.x.map(x => x[0]).join(' ') + ' ' + (r.d || []).join(' ')).toLowerCase();
   return words.every(w => hay.includes(w));
 }
 
@@ -319,6 +320,7 @@ function tileHTML(r, blkB, picked, takenAt, offered, short) {
   const taken = !on && tb && tb !== blkB;
   const also = [...offered[r.k]].filter(b => b !== blkB).sort(blockSort);
   const tags = r.x.map(([s, full]) => `<em title="${esc(full)}">${esc(s)}</em>`);
+  if (r.d) tags.unshift(...r.d.map(s => `<em class="chg" title="수정본에서 바뀐 곳">${esc(s)}</em>`));
   if (short && short.has(gradGroup(r)) && !on) tags.unshift(`<em class="need" title="${gradGroup(r)} 학점이 졸업 기준보다 모자람">졸업에 필요</em>`);
   if (r.g.length > 1) tags.push(`<em class="mix">${r.g.join(',')}학년</em>`);
   return `<button class="tile${on ? ' on' : ''}${taken ? ' taken' : ''}" type="button" data-sig="${esc(r.sig)}" data-k="${esc(r.k)}" style="--ac:var(--a-${r.a})" aria-pressed="${on}">`
@@ -490,6 +492,7 @@ const ro = new ResizeObserver(() => {
   document.documentElement.style.setProperty('--bh', $('mineBar').offsetHeight + 'px');
 });
 ro.observe($('top')); ro.observe($('mineBar'));
+if (DATA.label) $('label').textContent = DATA.label;
 
 // 졸업 학점 페이지에서 파일을 바꾸면(다른 탭, 뒤로 가기) 다시 계산
 window.addEventListener('storage', e => { if (e.key === GRAD_KEY) render(); });
